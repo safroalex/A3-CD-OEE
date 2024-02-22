@@ -12,3 +12,7 @@ RUN apt-get install -y --no-install-recommends timescaledb-2-postgresql-13 times
 WORKDIR /docker-entrypoint-initdb.d
 COPY --chown=postgres OEE-Node-red/oee_whole_dump.sql ./oee_dump
 COPY psql/init.sh .
+RUN localedef -i ru_RU -c -f UTF-8 -A /usr/share/locale/locale.alias ru_RU.UTF-8
+ENV LANG ru_RU.utf8
+ENV POSTGRES_PASSWORD postgres
+ENV TZ $TZ
