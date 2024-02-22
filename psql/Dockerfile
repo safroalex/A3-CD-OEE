@@ -4,3 +4,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends postgresql-13-p
 RUN git clone https://github.com/michelp/pgjwt.git
 WORKDIR /pgjwt
 RUN make install
+WORKDIR /
+RUN echo "deb https://packagecloud.io/timescale/timescaledb/debian/ $(lsb_release -c -s) main" | tee /etc/apt/sources.list.d/timescaledb.list
+RUN wget --quiet -O - https://packagecloud.io/timescale/timescaledb/gpgkey | apt-key add -
+RUN apt update
+RUN apt-get install -y --no-install-recommends timescaledb-2-postgresql-13 timescaledb-tools timescaledb-toolkit-postgresql-13
+WORKDIR /docker-entrypoint-initdb.d
+COPY --chown=postgres OEE-Node-red/oee_whole_dump.sql ./oee_dump
+COPY psql/init.sh .
