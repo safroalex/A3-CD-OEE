@@ -1,0 +1,4 @@
+FROM eclipse-mosquitto:2.0-openssl
+ARG SERVER_HOSTNAME
+ARG SERVER_IP
+ARG TZ
