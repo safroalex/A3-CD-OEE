@@ -2,3 +2,8 @@ FROM eclipse-mosquitto:2.0-openssl
 ARG SERVER_HOSTNAME
 ARG SERVER_IP
 ARG TZ
+ENV SERVER_HOSTNAME $SERVER_HOSTNAME
+ENV SERVER_IP $SERVER_IP
+ENV TZ $TZ
+RUN apk add --update openssl
+WORKDIR /mosquitto/config
