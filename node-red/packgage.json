@@ -1,0 +1,20 @@
+{
+    "name": "oee",
+    "description": "OEE",
+    "version": "0.0.1",
+    "dependencies": {
+      "node-red": "^3.1.0",
+      "node-red-contrib-jwt": "0.1.0",
+      "node-red-contrib-postgresql": "0.12.0",
+      "node-red-node-email": "2.0.0"
+    },
+    "node-red": {
+        "settings": {
+            "flowFile": "flows.json",
+            "credentialsFile": "flows_cred.json"
+        }
+    },
+    "scripts": {
+        "start": "node-red -v $FLOWS"
+    }
+}
