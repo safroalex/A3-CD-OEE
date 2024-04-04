@@ -1,0 +1,226 @@
+services:
+#*************************#
+#* mosquitto mqtt broker *#
+#*************************#
+  mosquitto:
+    container_name: mosquitto
+    networks:
+      - mqtt-private  
+    build:
+      context: ./
+      dockerfile: ./mosquitto/Dockerfile
+      args:
+        - SERVER_IP=${SERVER_IP}
+        - SERVER_HOSTNAME=${SERVER_HOSTNAME}
+        - TZ=${TZ}
+    ports:
+      - "8883:8883"  
+
+#****************************************************#
+#* postgresql with pgjwt and timescaledb extensions *#
+#****************************************************#
+  postgres:
+    container_name: postgres
+    networks:
+      - dbnet
+    build: 
+      context: ./
+      dockerfile: ./psql/Dockerfile
+      args:
+        - TZ=${TZ}          
+    volumes:
+      - pgdata:/var/lib/postgresql/data:rw
+      - ${PWD}/OEE-Node-red/oee_whole_dump.sql:/oee_whole_dump.sql
+      - ${PWD}/psql/init.sh:/docker-entrypoint-initdb.d/init.sh
+    ports:
+      - "5432:5432"
+
+#***********#
+#* pgadmin *#
+#***********#
+  pg_admin:
+    container_name: pg_admin
+    networks:
+      - dbnet
+      - public
+    image: dpage/pgadmin4:latest
+    environment:
+      PGADMIN_DEFAULT_EMAIL : kvv@evo-m.com
+      PGADMIN_DEFAULT_PASSWORD : postgres
+    depends_on:
+        - postgres
+
+#*******************************#
+#* postgres websocket listener *#
+#*******************************#
+  postgres-websockets:
+    container_name: posgres-websockets
+    networks:
+      - dbnet
+    image: diogob/postgres-websockets
+    environment:
+        PGWS_DB_URI : "postgres://postgres:postgres@postgres:5432/evomatics"
+        PGWS_POOL_SIZE : 10
+        PGWS_ROOT_PATH : "./client-root"
+        PGWS_LISTEN_CHANNEL : "postgres-websockets-listener"
+        PGWS_META_CHANNEL : server-info
+        PGWS_HOST : "0.0.0.0"
+        PGWS_PORT : 3000
+        PGWS_JWT_SECRET : ${JWT_SECRET}
+        PGWS_JWT_SECRET_BASE64 : "False"
+        PGWS_CHECK_LISTENER_INTERVAL : 10000
+        TZ : ${TZ}
+    depends_on:
+        - postgres
+
+#******************************************#
+#* postgrest (RESTful API for postgresql) *#
+#******************************************#
+
+  postgrest:
+    container_name: postgrest
+    networks:
+      - dbnet
+      - public
+    image: postgrest/postgrest:latest
+    environment:
+        PGRST_APP_SETTINGS_COOKIE_FLAGS : "SameSite=None; HttpOnly; Secure"
+        PGRST_APP_SETTINGS_JWT_SECRET : ${JWT_SECRET}
+        PGRST_JWT_SECRET : ${JWT_SECRET}
+        PGRST_DB_URI : "postgres://authenticator:postgrest@postgres:5432/evomatics"
+        PGRST_DB_SCHEMAS : "api"
+        PGRST_DB_ANON_ROLE : "web_anon"
+        PGRST_SERVER_PORT : 3001
+        PGRST_OPENAPI_SERVER_PROXY_URI : "https://${SERVER_HOSTNAME}/api/"
+        PGRST_OPENAPI_SECURITY_ACTIVE : true
+#        PGRST_SERVER_TRACE_HEADER : "Authorization"
+        TZ : ${TZ}
+    depends_on:
+      - postgres
+
+#***********************#
+#* nginx reverse proxy *#
+#***********************#
+  nginx:
+    container_name: nginx
+    networks:
+      - public
+    build: 
+        context: ./
+        dockerfile: ./nginx/Dockerfile
+        args:
+          - SERVER_IP=${SERVER_IP}
+          - SERVER_HOSTNAME=${SERVER_HOSTNAME}
+          - TZ=${TZ}
+    ports:
+      - "443:443"
+    depends_on:
+      - "postgrest"
+      - "node-red"
+
+#************#
+#* node-red *#
+#************#
+  node-red:
+    container_name: node-red
+    networks:
+      - dbnet
+      - mqtt-private
+      - public
+    build: 
+      context: ./
+      dockerfile: ./node-red/Dockerfile
+      args:
+        - DB_SERVER=postgres
+        - DBWS_SERVER=postgres-websockets:3000
+        - MOSQUITTO_SERVER=mosquitto
+        - PGWS_JWT_SECRET=${JWT_SECRET}
+        - TZ=${TZ}
+    environment:
+      PGRST_OPENAPI_SERVER_PROXY_URI : "https://${SERVER_HOSTNAME}/api/"
+    extra_hosts:
+      - "vmgit:192.168.88.30"
+    depends_on:
+      - "postgres"
+      - "postgres-websockets"
+      - "mosquitto"
+
+#********************************#
+#* swagger ui for postgrest API *#
+#********************************#
+  swagger-ui:
+    container_name: swagger
+    networks:
+      - public
+    image: swaggerapi/swagger-ui:v5.10.5
+    environment:
+      - API_URL=https://${SERVER_HOSTNAME}/api/
+      - TZ-${TZ}
+    restart: unless-stopped
+
+#******************************#
+#* front-end (stable version) *#
+#******************************#
+
+  front:
+    image: vmgit.local/docker_bot/oee_front:latest
+    container_name: front-stable
+    environment:
+      - API_URL=https://${SERVER_HOSTNAME}/api/
+      - EVENT_URL=wss://${SERVER_HOSTNAME}/ws/events
+      - TZ=${TZ}
+    command: >
+      sh -c "echo 'window._env_ = { BACKEND_ADDRESS: \"https://${SERVER_HOSTNAME}/api/\",  WS_ADDRESS: \"wss://${SERVER_HOSTNAME}/ws/events\"}' > /usr/share/nginx/html/env-config.js && nginx -g \"daemon off;\""
+    depends_on:
+      - "node-red"
+    networks:
+      - public
+
+#********************************#
+#* front-end (testing version ) *#
+#********************************#
+
+  front-testing:
+    container_name: front-testing
+    image: vmgit.local/docker_bot/oee_front:testing
+    environment:
+      - API_URL=https://${SERVER_HOSTNAME}/api/
+      - EVENT_URL=wss://${SERVER_HOSTNAME}/ws/events
+      - TZ=${TZ}
+    command: >
+      sh -c "echo 'window._env_ = { BACKEND_ADDRESS: \"https://${SERVER_HOSTNAME}/api/\",  WS_ADDRESS: \"wss://${SERVER_HOSTNAME}/ws/events\"}' > /usr/share/nginx/html/env-config.js && nginx -g \"daemon off;\""
+    depends_on:
+      - "node-red"
+    networks:
+      - public
+
+#***********************#
+#* grafana (temporary) *#
+#***********************#
+#  grafana:
+#    image: grafana/grafana-oss
+#    container_name: grafana
+#    restart: unless-stopped
+#    ports:
+#     - '3000:3000'
+#    networks:
+#      - dbnet
+#      - public
+           
+networks:
+  dbnet:
+    driver: bridge
+    name: dbnet
+  mqtt-private:
+    driver: bridge
+    name: mqtt
+  public:
+    name: public
+    driver: bridge
+volumes:
+  pgdata:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${PWD}/pgdata
